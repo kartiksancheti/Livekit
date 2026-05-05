@@ -504,17 +504,31 @@ class ExotelCallHandler:
     async def _recv_exotel(self, session) -> None:
         """Read Exotel WebSocket events and forward audio to Gemini."""
         from google.genai import types
-        print("DEBUG: _recv_exotel started, waiting for Exotel events", flush=True)
+        print("DEBUG: _recv_exotel started", flush=True)
         try:
             while not self._closed:
                 try:
                     raw = await self.ws.receive_text()
-                except Exception:
-                    print("DEBUG: _recv_exotel started, waiting for Exotel events", flush=True)
+                except Exception as e:
+                    print(f"DEBUG: receive_text failed: {type(e).__name__}: {e}", flush=True)
+                    # Try bytes — Exotel Stream might send binary
+                    try:
+                        raw_bytes = await self.ws.receive_bytes()
+                        print(f"DEBUG: got BYTES len={len(raw_bytes)} first10={raw_bytes[:10]}", flush=True)
+                    except Exception as e2:
+                        print(f"DEBUG: receive_bytes also failed: {e2}", flush=True)
                     break
-                data  = json.loads(raw)
+
+                print(f"DEBUG: got text len={len(raw)} first100={raw[:100]}", flush=True)
+
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    print(f"DEBUG: not JSON: {raw[:100]}", flush=True)
+                    continue
+
                 event = data.get("event")
-                print("DEBUG: _recv_exotel started, waiting for Exotel events", flush=True)
+                print(f"DEBUG: event={event}", flush=True)
 
                 if event == "connected":
                     await self._log("Exotel WebSocket connected")
