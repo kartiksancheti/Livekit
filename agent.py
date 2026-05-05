@@ -581,6 +581,7 @@ class ExotelCallHandler:
 
         model_id = cfg("GEMINI_MODEL")
         voice    = cfg("GEMINI_TTS_VOICE")
+        print(f"DEBUG: model={model_id} voice={voice}", flush=True)
 
         # Load agent profile (overrides voice / model / prompt)
         profile = None
@@ -603,11 +604,17 @@ class ExotelCallHandler:
             custom_prompt=prompt_tmpl,
         )
 
-        client = genai.Client(
-            api_key=api_key,
-            http_options={"api_version": "v1beta"},
-        )
-
+        print("DEBUG: creating Gemini client", flush=True)
+        try:
+            client = genai.Client(
+                api_key=api_key,
+                http_options={"api_version": "v1beta"},
+            )
+            print("DEBUG: Gemini client created OK", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"DEBUG: Gemini client FAILED: {e}\n{traceback.format_exc()}", flush=True)
+            return
         # Silence-prevention config (mirrors the spec's three-point pattern)
         realtime_cfg    = None
         ctx_compression = None
@@ -651,9 +658,11 @@ class ExotelCallHandler:
         config = types.LiveConnectConfig(**config_kwargs)
 
         await self._log(f"Gemini Live starting: model={model_id} voice={voice}")
+        print(f"DEBUG: connecting to Gemini Live model={model_id}", flush=True)
 
         try:
             async with client.aio.live.connect(model=model_id, config=config) as session:
+                print("DEBUG: Gemini Live session connected!", flush=True)
                 await asyncio.gather(
                     self._recv_exotel(session),
                     self._recv_gemini(session),
