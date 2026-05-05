@@ -665,13 +665,8 @@ class ExotelCallHandler:
 
         try:
             async with client.aio.live.connect(model=model_id, config=config) as session:
-                print(f"DEBUG: connecting to Gemini Live model={model_id}", flush=True)
-
-        try:
-            async with client.aio.live.connect(model=model_id, config=config) as session:
                 print("DEBUG: Gemini Live session connected!", flush=True)
 
-                # Send initial greeting to trigger Gemini to speak first
                 try:
                     await session.send(
                         input=f"The call just connected. Greet the lead immediately. Say: Hi, am I speaking with {self.lead_name or 'there'}?",
@@ -681,11 +676,9 @@ class ExotelCallHandler:
                 except Exception as e:
                     print(f"DEBUG: initial greeting failed: {e}", flush=True)
 
-                # Run both loops — stop as soon as either one finishes
                 exotel_task = asyncio.create_task(self._recv_exotel(session))
                 gemini_task = asyncio.create_task(self._recv_gemini(session))
 
-                # Wait for either task to finish, then cancel the other
                 done, pending = await asyncio.wait(
                     [exotel_task, gemini_task],
                     return_when=asyncio.FIRST_COMPLETED,
@@ -696,16 +689,15 @@ class ExotelCallHandler:
                         await task
                     except asyncio.CancelledError:
                         pass
-
                 for task in done:
                     exc = task.exception()
                     if exc:
                         print(f"DEBUG: task error: {type(exc).__name__}: {exc}", flush=True)
+
         except Exception as exc:
             await self._log(f"Gemini session error: {exc}", str(exc), "error")
         finally:
             if not self._closed:
-                # Log the call even if end_call tool was never called
                 duration = int(time.time() - self._call_start)
                 try:
                     await log_call(
