@@ -601,6 +601,9 @@ class ExotelCallHandler:
         )
 
         # Silence-prevention config (mirrors the spec's three-point pattern)
+        realtime_cfg    = None
+        ctx_compression = None
+
         try:
             realtime_cfg = types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(
@@ -609,14 +612,18 @@ class ExotelCallHandler:
                     prefix_padding_ms=200,
                 ),
             )
-            session_resumption = types.SessionResumptionConfig(transparent=True)
+            logger.info("VAD config applied")
+        except Exception as e:
+            logger.warning("VAD config skipped: %s", e)
+
+        try:
             ctx_compression = types.ContextWindowCompressionConfig(
                 trigger_tokens=25600,
                 sliding_window=types.SlidingWindow(target_tokens=12800),
             )
-        except Exception as cfg_err:
-            logger.warning("Could not build silence-prevention config: %s", cfg_err)
-            realtime_cfg = session_resumption = ctx_compression = None
+            logger.info("Context compression config applied")
+        except Exception as e:
+            logger.warning("Context compression skipped: %s", e)
 
         config_kwargs: dict = dict(
             response_modalities=["AUDIO"],
@@ -629,10 +636,10 @@ class ExotelCallHandler:
             tools=_build_gemini_tools(),
         )
         if realtime_cfg:
-            config_kwargs["realtime_input_config"]      = realtime_cfg
-            config_kwargs["session_resumption"]         = session_resumption
+            config_kwargs["realtime_input_config"] = realtime_cfg
+        if ctx_compression:
             config_kwargs["context_window_compression"] = ctx_compression
-
+          
         config = types.LiveConnectConfig(**config_kwargs)
 
         await self._log(f"Gemini Live starting: model={model_id} voice={voice}")
