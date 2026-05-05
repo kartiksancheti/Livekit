@@ -559,10 +559,18 @@ class ExotelCallHandler:
         Build Gemini Live session then run Exotel↔Gemini loops concurrently.
         Called by the /ws/exotel WebSocket endpoint in server.py.
         """
-        from google import genai
-        from google.genai import types
+        print("DEBUG: handler.run() started", flush=True)
+        try:
+            from google import genai
+            from google.genai import types
+            print(f"DEBUG: google-genai imported OK", flush=True)
+        except Exception as imp_err:
+            import traceback
+            print(f"DEBUG: google-genai IMPORT FAILED: {imp_err}\n{traceback.format_exc()}", flush=True)
+            return
 
         api_key = cfg("GOOGLE_API_KEY")
+        print(f"DEBUG: GOOGLE_API_KEY present={bool(api_key)}", flush=True)
         if not api_key:
             await self._log("GOOGLE_API_KEY not set", level="error")
             try:
