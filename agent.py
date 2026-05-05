@@ -322,9 +322,6 @@ class ExotelCallHandler:
 
         try:
             import httpx
-            # Redirect the live call to a human-agent flow using Exotel's redirect API.
-            # Configure EXOTEL_TRANSFER_APP_ID to an Exotel app that connects to a human agent,
-            # or set EXOTEL_TRANSFER_NUMBER and the app will forward to that number.
             redirect_url = (
                 f"https://my.exotel.com/{exotel_sid}/exoml/start_voice/{transfer_app}"
                 if transfer_app else
@@ -499,72 +496,73 @@ class ExotelCallHandler:
         except Exception as exc:
             await self._log(f"Gemini receive error: {exc}", str(exc), "error")
 
-    # ── Exotel receive loop ───────────────────────────────────────────────────
+    # ── Exotel receive loop (drains buffer queue then reads live) ─────────────
 
-    async def _recv_exotel(self, session) -> None:
-        """Read Exotel WebSocket events and forward audio to Gemini."""
+    async def _recv_exotel_from_queue(self, session, queue: asyncio.Queue) -> None:
+        """Process Exotel events — drains buffer queue first, then reads live from WebSocket."""
         from google.genai import types
-        print("DEBUG: _recv_exotel started", flush=True)
+        print("DEBUG: _recv_exotel_from_queue started", flush=True)
         try:
             while not self._closed:
+                # Try queue first (messages buffered during Gemini connect)
                 try:
-                    raw = await self.ws.receive_text()
-                except Exception as e:
-                    print(f"DEBUG: receive_text failed: {type(e).__name__}: {e}", flush=True)
-                    # Try bytes — Exotel Stream might send binary
+                    kind, raw = queue.get_nowait()
+                    if kind == "closed":
+                        print("DEBUG: WS closed signal from queue", flush=True)
+                        break
+                except asyncio.QueueEmpty:
+                    # Queue empty — read live from WebSocket
                     try:
-                        raw_bytes = await self.ws.receive_bytes()
-                        print(f"DEBUG: got BYTES len={len(raw_bytes)} first10={raw_bytes[:10]}", flush=True)
-                    except Exception as e2:
-                        print(f"DEBUG: receive_bytes also failed: {e2}", flush=True)
-                    break
-
-                print(f"DEBUG: got text len={len(raw)} first100={raw[:100]}", flush=True)
+                        raw = await self.ws.receive_text()
+                    except Exception as e:
+                        print(f"DEBUG: live receive ended: {type(e).__name__}: {e}", flush=True)
+                        break
 
                 try:
-                    data = json.loads(raw)
-                except Exception:
-                    print(f"DEBUG: not JSON: {raw[:100]}", flush=True)
-                    continue
+                    data  = json.loads(raw)
+                    event = data.get("event")
+                    print(f"DEBUG: event={event}", flush=True)
 
-                event = data.get("event")
-                print(f"DEBUG: event={event}", flush=True)
+                    if event == "connected":
+                        await self._log("Exotel WebSocket connected")
 
-                if event == "connected":
-                    await self._log("Exotel WebSocket connected")
+                    elif event == "start":
+                        s = data.get("start", {})
+                        self.stream_sid = s.get("streamSid") or s.get("stream_sid")
+                        self.call_sid   = s.get("callSid") or s.get("call_sid")
+                        params = s.get("customParameters", {})
+                        if not self.phone_number:
+                            self.phone_number = params.get("phone_number") or params.get("phone")
+                        if not self.lead_name:
+                            self.lead_name = params.get("lead_name") or params.get("name")
+                        print(f"DEBUG: stream_sid={self.stream_sid} call_sid={self.call_sid}", flush=True)
+                        await self._log(
+                            f"Stream started: sid={self.stream_sid} call={self.call_sid} phone={self.phone_number}"
+                        )
 
-                elif event == "start":
-                    s = data.get("start", {})
-                    self.stream_sid = s.get("streamSid")
-                    self.call_sid   = s.get("callSid")
-                    params = s.get("customParameters", {})
-                    if not self.phone_number:
-                        self.phone_number = params.get("phone_number") or params.get("phone")
-                    if not self.lead_name:
-                        self.lead_name = params.get("lead_name") or params.get("name")
-                    await self._log(
-                        f"Stream started: sid={self.stream_sid} call={self.call_sid} phone={self.phone_number}"
-                    )
-
-                elif event == "media":
-                    track = data["media"].get("track", "inbound")
-                    if track == "inbound":
-                        try:
-                            pcm = self._to_gemini(data["media"]["payload"])
-                            await session.send(
-                                types.LiveClientRealtimeInput(
-                                    media_chunks=[types.Blob(
-                                        data=pcm,
-                                        mime_type=f"audio/pcm;rate={GEMINI_IN_RATE}",
-                                    )]
+                    elif event == "media":
+                        track = data["media"].get("track", "inbound")
+                        if track == "inbound":
+                            try:
+                                pcm = self._to_gemini(data["media"]["payload"])
+                                await session.send(
+                                    types.LiveClientRealtimeInput(
+                                        media_chunks=[types.Blob(
+                                            data=pcm,
+                                            mime_type=f"audio/pcm;rate={GEMINI_IN_RATE}",
+                                        )]
+                                    )
                                 )
-                            )
-                        except Exception as exc:
-                            logger.debug("Audio forward error: %s", exc)
+                            except Exception as exc:
+                                logger.debug("Audio forward error: %s", exc)
 
-                elif event == "stop":
-                    await self._log("Exotel stream stopped")
-                    break
+                    elif event == "stop":
+                        await self._log("Exotel stream stopped")
+                        print("DEBUG: got stop event", flush=True)
+                        break
+
+                except Exception as pe:
+                    print(f"DEBUG: parse error: {pe} raw={raw[:100]}", flush=True)
 
         except Exception as exc:
             await self._log(f"Exotel receive error: {exc}", str(exc), "error")
@@ -575,15 +573,18 @@ class ExotelCallHandler:
         """
         Build Gemini Live session then run Exotel↔Gemini loops concurrently.
         Called by the /ws/exotel WebSocket endpoint in server.py.
+
+        KEY FIX: Start buffering Exotel messages immediately into a queue so
+        Exotel does not time out while Gemini connects (~1 second delay).
         """
         print("DEBUG: handler.run() started", flush=True)
         try:
             from google import genai
             from google.genai import types
-            print(f"DEBUG: google-genai imported OK", flush=True)
+            print("DEBUG: google-genai imported OK", flush=True)
         except Exception as imp_err:
             import traceback
-            print(f"DEBUG: google-genai IMPORT FAILED: {imp_err}\n{traceback.format_exc()}", flush=True)
+            print(f"DEBUG: IMPORT FAILED: {imp_err}\n{traceback.format_exc()}", flush=True)
             return
 
         api_key = cfg("GOOGLE_API_KEY")
@@ -632,7 +633,8 @@ class ExotelCallHandler:
             import traceback
             print(f"DEBUG: Gemini client FAILED: {e}\n{traceback.format_exc()}", flush=True)
             return
-        # Silence-prevention config (mirrors the spec's three-point pattern)
+
+        # Silence-prevention config
         realtime_cfg    = None
         ctx_compression = None
 
@@ -671,9 +673,33 @@ class ExotelCallHandler:
             config_kwargs["realtime_input_config"] = realtime_cfg
         if ctx_compression:
             config_kwargs["context_window_compression"] = ctx_compression
-          
+
         config = types.LiveConnectConfig(**config_kwargs)
 
+        # ── Start buffering Exotel messages IMMEDIATELY ───────────────────────
+        # This prevents Exotel from timing out while Gemini connects (~1 second)
+        exotel_queue: asyncio.Queue = asyncio.Queue()
+
+        async def _buffer_exotel():
+            """Read Exotel WebSocket messages into queue without blocking."""
+            print("DEBUG: buffer task started", flush=True)
+            try:
+                while True:
+                    try:
+                        raw = await self.ws.receive_text()
+                        await exotel_queue.put(("text", raw))
+                        print(f"DEBUG: buffered: {raw[:80]}", flush=True)
+                    except Exception as e:
+                        print(f"DEBUG: buffer ended: {type(e).__name__}: {e}", flush=True)
+                        await exotel_queue.put(("closed", None))
+                        break
+            except Exception as e:
+                print(f"DEBUG: buffer task error: {e}", flush=True)
+                await exotel_queue.put(("closed", None))
+
+        buffer_task = asyncio.create_task(_buffer_exotel())
+
+        # ── Now connect to Gemini (buffer keeps Exotel messages safe) ─────────
         await self._log(f"Gemini Live starting: model={model_id} voice={voice}")
         print(f"DEBUG: connecting to Gemini Live model={model_id}", flush=True)
 
@@ -681,6 +707,7 @@ class ExotelCallHandler:
             async with client.aio.live.connect(model=model_id, config=config) as session:
                 print("DEBUG: Gemini Live session connected!", flush=True)
 
+                # Trigger Gemini to speak first immediately
                 try:
                     await session.send(
                         input=f"The call just connected. Greet the lead immediately. Say: Hi, am I speaking with {self.lead_name or 'there'}?",
@@ -690,9 +717,13 @@ class ExotelCallHandler:
                 except Exception as e:
                     print(f"DEBUG: initial greeting failed: {e}", flush=True)
 
-                exotel_task = asyncio.create_task(self._recv_exotel(session))
+                # Run Exotel (buffer+live) and Gemini receive loops together
+                exotel_task = asyncio.create_task(
+                    self._recv_exotel_from_queue(session, exotel_queue)
+                )
                 gemini_task = asyncio.create_task(self._recv_gemini(session))
 
+                # Stop as soon as either loop finishes
                 done, pending = await asyncio.wait(
                     [exotel_task, gemini_task],
                     return_when=asyncio.FIRST_COMPLETED,
@@ -704,13 +735,19 @@ class ExotelCallHandler:
                     except asyncio.CancelledError:
                         pass
                 for task in done:
-                    exc = task.exception()
-                    if exc:
-                        print(f"DEBUG: task error: {type(exc).__name__}: {exc}", flush=True)
+                    if not task.cancelled():
+                        exc = task.exception()
+                        if exc:
+                            print(f"DEBUG: task error: {type(exc).__name__}: {exc}", flush=True)
 
         except Exception as exc:
             await self._log(f"Gemini session error: {exc}", str(exc), "error")
         finally:
+            buffer_task.cancel()
+            try:
+                await buffer_task
+            except asyncio.CancelledError:
+                pass
             if not self._closed:
                 duration = int(time.time() - self._call_start)
                 try:
