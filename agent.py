@@ -512,11 +512,20 @@ class ExotelCallHandler:
                         break
                 except asyncio.QueueEmpty:
                     # Queue empty — read live from WebSocket
+                    # then read live directly (buffer task must be done first)
+                    await asyncio.sleep(0)  # yield to let buffer task finish
                     try:
-                        raw = await self.ws.receive_text()
-                    except Exception as e:
-                        print(f"DEBUG: live receive ended: {type(e).__name__}: {e}", flush=True)
-                        break
+                        kind, raw = queue.get_nowait()
+                        if kind == "closed":
+                            print("DEBUG: WS closed signal from queue", flush=True)
+                            break
+                    except asyncio.QueueEmpty:
+                        # Truly empty — read live from WebSocket
+                        try:
+                            raw = await self.ws.receive_text()
+                        except Exception as e:
+                            print(f"DEBUG: live receive ended: {type(e).__name__}: {e}", flush=True)
+                            break
 
                 try:
                     data  = json.loads(raw)
@@ -717,7 +726,16 @@ class ExotelCallHandler:
                 except Exception as e:
                     print(f"DEBUG: initial greeting failed: {e}", flush=True)
 
-                # Run Exotel (buffer+live) and Gemini receive loops together
+                # Stop buffer task before starting live reading
+                # (can't have two coroutines reading the same WebSocket)
+                buffer_task.cancel()
+                try:
+                    await buffer_task
+                except asyncio.CancelledError:
+                    pass
+                print("DEBUG: buffer task stopped, switching to live reading", flush=True)
+
+                # Run Exotel (queue drain + live) and Gemini receive loops together
                 exotel_task = asyncio.create_task(
                     self._recv_exotel_from_queue(session, exotel_queue)
                 )
@@ -743,11 +761,12 @@ class ExotelCallHandler:
         except Exception as exc:
             await self._log(f"Gemini session error: {exc}", str(exc), "error")
         finally:
-            buffer_task.cancel()
-            try:
-                await buffer_task
-            except asyncio.CancelledError:
-                pass
+            if not buffer_task.done():
+                buffer_task.cancel()
+                try:
+                    await buffer_task
+                except asyncio.CancelledError:
+                    pass
             if not self._closed:
                 duration = int(time.time() - self._call_start)
                 try:
