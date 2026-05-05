@@ -504,14 +504,17 @@ class ExotelCallHandler:
     async def _recv_exotel(self, session) -> None:
         """Read Exotel WebSocket events and forward audio to Gemini."""
         from google.genai import types
+        print("DEBUG: _recv_exotel started, waiting for Exotel events", flush=True)
         try:
             while not self._closed:
                 try:
                     raw = await self.ws.receive_text()
                 except Exception:
+                    print("DEBUG: _recv_exotel started, waiting for Exotel events", flush=True)
                     break
                 data  = json.loads(raw)
                 event = data.get("event")
+                print("DEBUG: _recv_exotel started, waiting for Exotel events", flush=True)
 
                 if event == "connected":
                     await self._log("Exotel WebSocket connected")
@@ -663,6 +666,16 @@ class ExotelCallHandler:
         try:
             async with client.aio.live.connect(model=model_id, config=config) as session:
                 print("DEBUG: Gemini Live session connected!", flush=True)
+                # Trigger Gemini to speak first without waiting for audio
+                try:
+                    await session.send(
+                        input=f"The call just connected. Greet the lead immediately. Say: Hi, am I speaking with {self.lead_name or 'there'}?",
+                        end_of_turn=True,
+                    )
+                    print("DEBUG: initial greeting sent to Gemini", flush=True)
+                except Exception as e:
+                    print(f"DEBUG: initial greeting failed: {e}", flush=True)
+
                 await asyncio.gather(
                     self._recv_exotel(session),
                     self._recv_gemini(session),
