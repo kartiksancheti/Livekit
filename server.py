@@ -1,3 +1,4 @@
+import traceback
 import asyncio
 import csv
 import io
@@ -234,8 +235,13 @@ async def exotel_ws(
     except WebSocketDisconnect:
         pass
     except Exception as exc:
-        await log_error("server", f"WebSocket handler error: {exc}", str(exc), "error")
-
+        tb = traceback.format_exc()
+        # Print directly to stdout so it shows in Coolify logs regardless of Supabase
+        print(f"WEBSOCKET ERROR: {type(exc).__name__}: {exc}\n{tb}", flush=True)
+        try:
+            await log_error("server", f"WebSocket handler error: {type(exc).__name__}: {exc}", tb, "error")
+        except Exception:
+            pass
 
 # ── Exotel status callback (optional webhook) ─────────────────────────────────
 
