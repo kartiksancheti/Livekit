@@ -266,6 +266,34 @@ class ExotelCallHandler:
             print(f"DEBUG: send_media error: {exc}", flush=True)
             logger.debug("Exotel send error: %s", exc)
 
+    async def _send_keepalive_silence(self) -> None:
+        """Send silence audio to Exotel every 100ms to keep connection alive
+        while Gemini is generating its first response."""
+        silence_chunk = b'\x00' * 1600
+        silence_b64 = base64.b64encode(silence_chunk).decode()
+        print("DEBUG: keepalive silence started", flush=True)
+        chunks_sent = 0
+        try:
+            while not self._closed and chunks_sent < 100:
+                if self.stream_sid and not self._closed:
+                    try:
+                        await self.ws.send_text(json.dumps({
+                            "event": "media",
+                            "stream_sid": self.stream_sid,
+                            "media": {
+                                "payload": silence_b64,
+                                "chunk": chunks_sent + 1,
+                                "timestamp": str(chunks_sent * 100),
+                            },
+                        }))
+                        chunks_sent += 1
+                    except Exception:
+                        break
+                await asyncio.sleep(0.1)
+        except Exception as e:
+            print(f"DEBUG: keepalive silence ended: {e}", flush=True)
+        print(f"DEBUG: keepalive silence stopped after {chunks_sent} chunks", flush=True)
+
     # ── Tool implementations ──────────────────────────────────────────────────
 
     async def _exec_tool(self, name: str, args: dict) -> str:
@@ -574,6 +602,9 @@ class ExotelCallHandler:
                         await self._log(
                             f"Stream started: sid={self.stream_sid} call={self.call_sid} phone={self.phone_number}"
                         )
+                        # Send silence immediately to keep Exotel connection alive
+                        # while Gemini is generating the first response
+                        asyncio.create_task(self._send_keepalive_silence())
 
                     elif event == "media":
                         track = data["media"].get("track", "inbound")
