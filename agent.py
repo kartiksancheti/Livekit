@@ -551,20 +551,11 @@ class ExotelCallHandler:
                         break
                 except asyncio.QueueEmpty:
                     # Queue empty — read live from WebSocket
-                    # then read live directly (buffer task must be done first)
-                    await asyncio.sleep(0)  # yield to let buffer task finish
                     try:
-                        kind, raw = queue.get_nowait()
-                        if kind == "closed":
-                            print("DEBUG: WS closed signal from queue", flush=True)
-                            break
-                    except asyncio.QueueEmpty:
-                        # Truly empty — read live from WebSocket
-                        try:
-                            raw = await self.ws.receive_text()
-                        except Exception as e:
-                            print(f"DEBUG: live receive ended: {type(e).__name__}: {e}", flush=True)
-                            break
+                        raw = await self.ws.receive_text()
+                    except Exception as e:
+                        print(f"INFO: live receive ended: {type(e).__name__}: {e}", flush=True)
+                        break
 
                 try:
                     data  = json.loads(raw)
@@ -799,12 +790,30 @@ class ExotelCallHandler:
                 gemini_task = asyncio.create_task(self._recv_gemini(session))
                 keepalive_task = asyncio.create_task(self._send_keepalive_silence())
 
+                async def _gemini_ping():
+                    """Send silence to Gemini every 5s to keep session alive."""
+                    silence = b'\x00' * 3200  # 100ms at 16kHz
+                    from google.genai import types as _t
+                    while not self._closed:
+                        try:
+                            await session.send_realtime_input(
+                                audio=_t.Blob(
+                                    data=silence,
+                                    mime_type=f"audio/pcm;rate={GEMINI_IN_RATE}",
+                                )
+                            )
+                        except Exception:
+                            break
+                        await asyncio.sleep(5)
+
+                gemini_ping_task = asyncio.create_task(_gemini_ping())
                 # Stop as soon as either loop finishes
                 done, pending = await asyncio.wait(
                     [exotel_task, gemini_task],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 keepalive_task.cancel()
+                gemini_ping_task.cancel()
                 for task in pending:
                     task.cancel()
                     try:
