@@ -597,9 +597,20 @@ class ExotelCallHandler:
                         if isinstance(params, str):
                             try:
                                 import json as _json
-                                params = _json.loads(params)
+                                import html
+                                params = _json.loads(html.unescape(params))
                             except Exception:
                                 params = {}
+                        # Also handle dict with HTML-encoded keys
+                        if isinstance(params, dict) and len(params) == 1:
+                            key = list(params.keys())[0]
+                            if '&quot;' in key or '"' in key:
+                                try:
+                                    import json as _json
+                                    import html
+                                    params = _json.loads(html.unescape(key))
+                                except Exception:
+                                    pass
                         if not self.phone_number:
                             self.phone_number = (
                                 params.get("phone_number") or
@@ -765,7 +776,11 @@ class ExotelCallHandler:
                     try:
                         raw = await self.ws.receive_text()
                         await exotel_queue.put(("text", raw))
-                        print(f"DEBUG: buffered: {raw[:80]}", flush=True)
+                        try:
+                            if json.loads(raw).get("event") != "media":
+                                print(f"DEBUG: buffered: {raw[:80]}", flush=True)
+                        except Exception:
+                            pass
                     except Exception as e:
                         print(f"DEBUG: buffer ended: {type(e).__name__}: {e}", flush=True)
                         await exotel_queue.put(("closed", None))
