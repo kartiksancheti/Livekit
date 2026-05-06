@@ -249,6 +249,8 @@ class ExotelCallHandler:
         """Encode Gemini audio and push to Exotel WebSocket."""
         if not self.stream_sid or self._closed:
             return
+        if not hasattr(self.ws, 'client_state') or self.ws.client_state.value >= 2:
+            return
         try:
             payload = self._to_exotel(pcm_bytes)
             await self.ws.send_text(json.dumps({
