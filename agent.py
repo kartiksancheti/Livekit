@@ -269,7 +269,7 @@ class ExotelCallHandler:
     async def _send_keepalive_silence(self) -> None:
         """Send silence audio to Exotel every 100ms to keep connection alive
         while Gemini is generating its first response."""
-        silence_chunk = b'\x00' * 1600
+        silence_chunk = b'\x00' * 3200
         silence_b64 = base64.b64encode(silence_chunk).decode()
         print("DEBUG: keepalive silence started", flush=True)
         chunks_sent = 0
@@ -592,11 +592,24 @@ class ExotelCallHandler:
                         media_format = s.get("media_format", {})
                         print(f"DEBUG: media_format={media_format}", flush=True)
                         print(f"DEBUG: full start payload={json.dumps(s)[:300]}", flush=True)
-                        params = s.get("customParameters", {}) or s.get("custom_parameters", {})
+                        params = s.get("custom_parameters", {}) or s.get("customParameters", {})
+                        # custom_parameters may be a JSON string — parse it
+                        if isinstance(params, str):
+                            try:
+                                import json as _json
+                                params = _json.loads(params)
+                            except Exception:
+                                params = {}
                         if not self.phone_number:
-                            self.phone_number = params.get("phone_number") or params.get("phone")
+                            self.phone_number = (
+                                params.get("phone_number") or
+                                params.get("phone") or
+                                s.get("from") or
+                                s.get("From")
+                            )
                         if not self.lead_name:
                             self.lead_name = params.get("lead_name") or params.get("name")
+                        print(f"DEBUG: params={params} phone={self.phone_number}", flush=True)
                         print(f"DEBUG: stream_sid={self.stream_sid} call_sid={self.call_sid}", flush=True)
                         await self._log(
                             f"Stream started: sid={self.stream_sid} call={self.call_sid} phone={self.phone_number}"
@@ -794,12 +807,14 @@ class ExotelCallHandler:
                     self._recv_exotel_from_queue(session, exotel_queue)
                 )
                 gemini_task = asyncio.create_task(self._recv_gemini(session))
+                keepalive_task = asyncio.create_task(self._send_keepalive_silence())
 
                 # Stop as soon as either loop finishes
                 done, pending = await asyncio.wait(
                     [exotel_task, gemini_task],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                keepalive_task.cancel()
                 for task in pending:
                     task.cancel()
                     try:
