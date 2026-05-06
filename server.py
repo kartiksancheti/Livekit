@@ -94,6 +94,7 @@ async def _initiate_exotel_call(
         "AppId":       app_id,
         "CustomField": custom_field,
         "StatusCallbackEvents[]": "terminal",
+        "Url": f"https://my.exotel.com/{sid}/exoml/start_voice/{app_id}",
     }
     if status_cb:
         payload["StatusCallback"] = status_cb
