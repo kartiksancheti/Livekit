@@ -101,10 +101,12 @@ async def _initiate_exotel_call(
         payload["StatusCallback"] = status_cb
 
     url = f"https://api.exotel.com/v1/Accounts/{sid}/Calls/connect"
+    print(f"DEBUG EXOTEL PAYLOAD: From={payload['From']} To={payload['To']} AppId={payload['AppId']}", flush=True)
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(url, auth=(api_key, api_token), data=payload)
+        print(f"DEBUG EXOTEL RESPONSE: status={resp.status_code} body={resp.text[:300]}", flush=True)
         data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
         if resp.status_code not in (200, 201):
             detail = data.get("RestException", {}).get("Message", "") or str(data) or f"HTTP {resp.status_code}"
