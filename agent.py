@@ -476,12 +476,9 @@ class ExotelCallHandler:
                 # ── Audio output ──────────────────────────────────────────────
                 audio: Optional[bytes] = None
 
-                # Check direct data attribute
                 if getattr(response, "data", None):
                     audio = response.data
                     print(f"DEBUG: audio from response.data len={len(audio)}", flush=True)
-
-                # Check server_content path
                 elif (
                     getattr(response, "server_content", None)
                     and getattr(response.server_content, "model_turn", None)
@@ -575,12 +572,10 @@ class ExotelCallHandler:
                         if track == "inbound":
                             try:
                                 pcm = self._to_gemini(data["media"]["payload"])
-                                await session.send(
-                                    types.LiveClientRealtimeInput(
-                                        media_chunks=[types.Blob(
-                                            data=pcm,
-                                            mime_type=f"audio/pcm;rate={GEMINI_IN_RATE}",
-                                        )]
+                                await session.send_realtime_input(
+                                    audio=types.Blob(
+                                        data=pcm,
+                                        mime_type=f"audio/pcm;rate={GEMINI_IN_RATE}",
                                     )
                                 )
                             except Exception as exc:
@@ -739,9 +734,8 @@ class ExotelCallHandler:
 
                 # Trigger Gemini to speak first immediately
                 try:
-                    await session.send(
-                        input=f"The call just connected. Greet the lead immediately. Say: Hi, am I speaking with {self.lead_name or 'there'}?",
-                        end_of_turn=True,
+                    await session.send_realtime_input(
+                        text=f"The call just connected. Greet the lead immediately. Say: Hi, am I speaking with {self.lead_name or 'there'}?"
                     )
                     print("DEBUG: initial greeting sent to Gemini", flush=True)
                 except Exception as e:
