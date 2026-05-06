@@ -240,10 +240,15 @@ class ExotelCallHandler:
 
     def _to_exotel(self, pcm_bytes: bytes) -> str:
         """PCM-16bit-24kHz from Gemini → raw PCM 8kHz base64 for Exotel."""
+        # Ensure chunk size is multiple of 320 bytes as required by Exotel
         pcm_8k, self._out_state = audioop.ratecv(
             pcm_bytes, 2, 1, GEMINI_OUT_RATE, EXOTEL_RATE, self._out_state
         )
-        return base64.b64encode(pcm_8k).decode()  # raw PCM, no mulaw encoding
+        # Pad to multiple of 320 if needed
+        remainder = len(pcm_8k) % 320
+        if remainder:
+            pcm_8k += b'\x00' * (320 - remainder)
+        return base64.b64encode(pcm_8k).decode()
 
     async def _send_media(self, pcm_bytes: bytes) -> None:
         """Encode Gemini audio and push to Exotel WebSocket."""
@@ -544,8 +549,8 @@ class ExotelCallHandler:
         except Exception as exc:
             print(f"DEBUG: _recv_gemini error: {type(exc).__name__}: {exc}", flush=True)
             await self._log(f"Gemini receive error: {exc}", str(exc), "error")
-      
-        print(f"DEBUG: _recv_gemini ended after {response_count} responses", flush=True)
+        finally:
+            print(f"DEBUG: _recv_gemini ended after {response_count} responses", flush=True)
 
     # ── Exotel receive loop (drains buffer queue then reads live) ─────────────
 
@@ -728,10 +733,12 @@ class ExotelCallHandler:
         try:
             realtime_cfg = types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(
-                    disabled=True,  # disable VAD — we control turn-taking manually
+                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                    silence_duration_ms=1000,
+                    prefix_padding_ms=200,
                 ),
             )
-            logger.info("VAD disabled — manual turn control")
+            logger.info("VAD config applied")
         except Exception as e:
             logger.warning("VAD config skipped: %s", e)
 
