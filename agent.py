@@ -472,6 +472,9 @@ class ExotelCallHandler:
                 if response_count <= 5:
                     print(f"DEBUG: gemini response #{response_count} type={type(response).__name__}", flush=True)
                     print(f"DEBUG: response attrs={[a for a in dir(response) if not a.startswith('_')]}", flush=True)
+                    print(f"DEBUG: server_content={getattr(response, 'server_content', None)}", flush=True)
+                    print(f"DEBUG: setup_complete={getattr(response, 'setup_complete', None)}", flush=True)
+                    print(f"DEBUG: data={getattr(response, 'data', None)}", flush=True)
 
                 # ── Audio output ──────────────────────────────────────────────
                 audio: Optional[bytes] = None
@@ -504,8 +507,8 @@ class ExotelCallHandler:
                             name=fn.name, id=fn.id, response={"result": result}
                         ))
                     if fn_responses:
-                        await session.send(
-                            types.LiveClientToolResponse(function_responses=fn_responses)
+                        await session.send_tool_response(
+                            function_responses=fn_responses
                         )
 
         except Exception as exc:
