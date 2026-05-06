@@ -253,8 +253,12 @@ class ExotelCallHandler:
             payload = self._to_exotel(pcm_bytes)
             await self.ws.send_text(json.dumps({
                 "event": "media",
-                "streamSid": self.stream_sid,
-                "media": {"payload": payload},
+                "stream_sid": self.stream_sid,
+                "media": {
+                    "payload": payload,
+                    "chunk": 1,
+                    "timestamp": int(time.time() * 1000),
+                },
             }))
         except Exception as exc:
             logger.debug("Exotel send error: %s", exc)
