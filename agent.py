@@ -761,9 +761,37 @@ class ExotelCallHandler:
 
         buffer_task = asyncio.create_task(_buffer_exotel())
 
+        # ── Pre-read stream_sid from buffer before Gemini connects ────────────
+        # This lets keepalive send silence immediately after start event
+        async def _preseed_stream_sid():
+            """Peek at buffered events to get stream_sid ASAP."""
+            await asyncio.sleep(0.3)  # give buffer time to collect start event
+            temp = []
+            while True:
+                try:
+                    kind, raw = exotel_queue.get_nowait()
+                    temp.append((kind, raw))
+                    if kind == "text":
+                        try:
+                            d = json.loads(raw)
+                            if d.get("event") == "start":
+                                s = d.get("start", {})
+                                sid = s.get("streamSid") or s.get("stream_sid")
+                                if sid and not self.stream_sid:
+                                    self.stream_sid = sid
+                                    print(f"INFO: pre-seeded stream_sid={sid}", flush=True)
+                        except Exception:
+                            pass
+                except asyncio.QueueEmpty:
+                    break
+            # Put them all back
+            for item in temp:
+                await exotel_queue.put(item)
+
+        await _preseed_stream_sid()
+
         # ── Now connect to Gemini (buffer keeps Exotel messages safe) ─────────
         await self._log(f"Gemini Live starting: model={model_id} voice={voice}")
-
         try:
             async with client.aio.live.connect(model=model_id, config=config) as session:
                 print("DEBUG: Gemini Live session connected!", flush=True)
