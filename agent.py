@@ -586,8 +586,11 @@ class ExotelCallHandler:
                                         mime_type=f"audio/pcm;rate={GEMINI_IN_RATE}",
                                     )
                                 )
+                                await asyncio.sleep(0)  # yield to _recv_gemini
                             except Exception as exc:
                                 logger.debug("Audio forward error: %s", exc)
+                        elif track == "outbound":
+                            pass  # ignore outbound (our own audio echoed back)
 
                     elif event == "stop":
                         await self._log("Exotel stream stopped")
@@ -674,12 +677,10 @@ class ExotelCallHandler:
         try:
             realtime_cfg = types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(
-                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                    silence_duration_ms=2000,
-                    prefix_padding_ms=200,
+                    disabled=True,  # disable VAD — we control turn-taking manually
                 ),
             )
-            logger.info("VAD config applied")
+            logger.info("VAD disabled — manual turn control")
         except Exception as e:
             logger.warning("VAD config skipped: %s", e)
 
