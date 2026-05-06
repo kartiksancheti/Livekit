@@ -572,6 +572,9 @@ class ExotelCallHandler:
 
                     if event == "connected":
                         await self._log("Exotel WebSocket connected")
+                        print(f"INFO: event={event}", flush=True)
+                    elif event in ("start", "stop"):
+                        print(f"INFO: event={event}", flush=True)
 
                     elif event == "start":
                         s = data.get("start", {})
