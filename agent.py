@@ -258,8 +258,8 @@ class ExotelCallHandler:
                 "stream_sid": self.stream_sid,
                 "media": {
                     "payload": payload,
-                    "chunk": 1,
-                    "timestamp": int(time.time() * 1000),
+                    "chunk": "1",
+                    "timestamp": str(int(time.time() * 1000)),
                 },
             }))
         except Exception as exc:
@@ -282,7 +282,7 @@ class ExotelCallHandler:
                             "stream_sid": self.stream_sid,
                             "media": {
                                 "payload": silence_b64,
-                                "chunk": chunks_sent + 1,
+                                "chunk": str(chunks_sent + 1),
                                 "timestamp": str(chunks_sent * 100),
                             },
                         }))
