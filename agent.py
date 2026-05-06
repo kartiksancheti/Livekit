@@ -261,6 +261,7 @@ class ExotelCallHandler:
                 },
             }))
         except Exception as exc:
+            print(f"DEBUG: send_media error: {exc}", flush=True)
             logger.debug("Exotel send error: %s", exc)
 
     # ── Tool implementations ──────────────────────────────────────────────────
