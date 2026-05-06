@@ -581,7 +581,6 @@ class ExotelCallHandler:
                 try:
                     data  = json.loads(raw)
                     event = data.get("event")
-                    print(f"DEBUG: event={event}", flush=True)
 
                     if event == "connected":
                         await self._log("Exotel WebSocket connected")
