@@ -276,7 +276,6 @@ class ExotelCallHandler:
         while Gemini is generating its first response."""
         silence_chunk = b'\x00' * 3200
         silence_b64 = base64.b64encode(silence_chunk).decode()
-        print("DEBUG: keepalive silence started", flush=True)
         chunks_sent = 0
         try:
             while not self._closed and chunks_sent < 100:
@@ -296,9 +295,7 @@ class ExotelCallHandler:
                         break
                 await asyncio.sleep(0.1)
         except Exception as e:
-            print(f"DEBUG: keepalive silence ended: {e}", flush=True)
-        print(f"DEBUG: keepalive silence stopped after {chunks_sent} chunks", flush=True)
-
+            logger.debug("Keepalive silence error: %s", e)
     # ── Tool implementations ──────────────────────────────────────────────────
 
     async def _exec_tool(self, name: str, args: dict) -> str:
@@ -496,7 +493,6 @@ class ExotelCallHandler:
     async def _recv_gemini(self, session) -> None:
         """Read Gemini Live responses: forward audio to Exotel, execute tool calls."""
         from google.genai import types
-        print("DEBUG: _recv_gemini started", flush=True)
         response_count = 0
         try:
             async for response in session.receive():
@@ -504,19 +500,11 @@ class ExotelCallHandler:
                     break
 
                 response_count += 1
-                if response_count <= 5:
-                    print(f"DEBUG: gemini response #{response_count} type={type(response).__name__}", flush=True)
-                    print(f"DEBUG: response attrs={[a for a in dir(response) if not a.startswith('_')]}", flush=True)
-                    print(f"DEBUG: server_content={getattr(response, 'server_content', None)}", flush=True)
-                    print(f"DEBUG: setup_complete={getattr(response, 'setup_complete', None)}", flush=True)
-                    print(f"DEBUG: data={getattr(response, 'data', None)}", flush=True)
-
                 # ── Audio output ──────────────────────────────────────────────
                 audio: Optional[bytes] = None
 
                 if getattr(response, "data", None):
                     audio = response.data
-                    print(f"DEBUG: audio from response.data len={len(audio)}", flush=True)
                 elif (
                     getattr(response, "server_content", None)
                     and getattr(response.server_content, "model_turn", None)
@@ -524,13 +512,9 @@ class ExotelCallHandler:
                     for part in response.server_content.model_turn.parts or []:
                         if getattr(getattr(part, "inline_data", None), "data", None):
                             audio = part.inline_data.data
-                            print(f"DEBUG: audio from inline_data len={len(audio)}", flush=True)
                             break
                 if audio:
                     await self._send_media(audio)
-                elif response_count <= 5:
-                    print(f"DEBUG: no audio in this response", flush=True)
-
                 # ── Tool calls ────────────────────────────────────────────────
                 if getattr(response, "tool_call", None):
                     fn_responses = []
@@ -557,7 +541,6 @@ class ExotelCallHandler:
     async def _recv_exotel_from_queue(self, session, queue: asyncio.Queue) -> None:
         """Process Exotel events — drains buffer queue first, then reads live from WebSocket."""
         from google.genai import types
-        print("DEBUG: _recv_exotel_from_queue started", flush=True)
         try:
             while not self._closed:
                 # Try queue first (messages buffered during Gemini connect)
@@ -595,8 +578,6 @@ class ExotelCallHandler:
                         self.stream_sid = s.get("streamSid") or s.get("stream_sid")
                         self.call_sid   = s.get("callSid") or s.get("call_sid")
                         media_format = s.get("media_format", {})
-                        print(f"DEBUG: media_format={media_format}", flush=True)
-                        print(f"DEBUG: full start payload={json.dumps(s)[:300]}", flush=True)
                         params = s.get("custom_parameters", {}) or s.get("customParameters", {})
                         # custom_parameters may be a JSON string — parse it
                         if isinstance(params, str):
@@ -625,8 +606,6 @@ class ExotelCallHandler:
                             )
                         if not self.lead_name:
                             self.lead_name = params.get("lead_name") or params.get("name")
-                        print(f"DEBUG: params={params} phone={self.phone_number}", flush=True)
-                        print(f"DEBUG: stream_sid={self.stream_sid} call_sid={self.call_sid}", flush=True)
                         await self._log(
                             f"Stream started: sid={self.stream_sid} call={self.call_sid} phone={self.phone_number}"
                         )
@@ -650,7 +629,6 @@ class ExotelCallHandler:
 
                     elif event == "stop":
                         await self._log("Exotel stream stopped")
-                        print("DEBUG: got stop event", flush=True)
                         break
 
                 except Exception as pe:
@@ -673,14 +651,12 @@ class ExotelCallHandler:
         try:
             from google import genai
             from google.genai import types
-            print("DEBUG: google-genai imported OK", flush=True)
         except Exception as imp_err:
             import traceback
             print(f"DEBUG: IMPORT FAILED: {imp_err}\n{traceback.format_exc()}", flush=True)
             return
 
         api_key = cfg("GOOGLE_API_KEY")
-        print(f"DEBUG: GOOGLE_API_KEY present={bool(api_key)}", flush=True)
         if not api_key:
             await self._log("GOOGLE_API_KEY not set", level="error")
             try:
@@ -691,7 +667,6 @@ class ExotelCallHandler:
 
         model_id = cfg("GEMINI_MODEL")
         voice    = cfg("GEMINI_TTS_VOICE")
-        print(f"DEBUG: model={model_id} voice={voice}", flush=True)
 
         # Load agent profile (overrides voice / model / prompt)
         profile = None
@@ -714,13 +689,11 @@ class ExotelCallHandler:
             custom_prompt=prompt_tmpl,
         )
 
-        print("DEBUG: creating Gemini client", flush=True)
         try:
             client = genai.Client(
                 api_key=api_key,
                 http_options={"api_version": "v1beta"},
             )
-            print("DEBUG: Gemini client created OK", flush=True)
         except Exception as e:
             import traceback
             print(f"DEBUG: Gemini client FAILED: {e}\n{traceback.format_exc()}", flush=True)
@@ -774,7 +747,6 @@ class ExotelCallHandler:
 
         async def _buffer_exotel():
             """Read Exotel WebSocket messages into queue without blocking."""
-            print("DEBUG: buffer task started", flush=True)
             try:
                 while True:
                     try:
@@ -797,7 +769,6 @@ class ExotelCallHandler:
 
         # ── Now connect to Gemini (buffer keeps Exotel messages safe) ─────────
         await self._log(f"Gemini Live starting: model={model_id} voice={voice}")
-        print(f"DEBUG: connecting to Gemini Live model={model_id}", flush=True)
 
         try:
             async with client.aio.live.connect(model=model_id, config=config) as session:
@@ -808,10 +779,8 @@ class ExotelCallHandler:
                     await session.send_realtime_input(
                         text=f"The call just connected. Greet the lead immediately. Say: Hi, am I speaking with {self.lead_name or 'there'}?"
                     )
-                    print("DEBUG: initial greeting sent to Gemini", flush=True)
                 except Exception as e:
-                    print(f"DEBUG: initial greeting failed: {e}", flush=True)
-
+                    logger.warning("Initial greeting failed: %s", e)
                 # Stop buffer task before starting live reading
                 # (can't have two coroutines reading the same WebSocket)
                 buffer_task.cancel()
@@ -819,7 +788,6 @@ class ExotelCallHandler:
                     await buffer_task
                 except asyncio.CancelledError:
                     pass
-                print("DEBUG: buffer task stopped, switching to live reading", flush=True)
 
                 # Run Exotel (queue drain + live) and Gemini receive loops together
                 exotel_task = asyncio.create_task(
