@@ -90,10 +90,9 @@ async def _initiate_exotel_call(
     status_cb = cfg("EXOTEL_STATUS_CALLBACK")
 
     payload = {
-        "From":        clean,       # customer phone (who gets called)
-        "To":          caller_id,   # your Exotel virtual number
+        "From":        clean,       # customer number — Exotel calls this first
         "CallerId":    caller_id,   # Exotel virtual number shown as caller ID
-        "AppId":       app_id,      # app runs when customer answers
+        "AppId":       app_id,      # VoiceBot app runs after customer answers
         "CustomField": custom_field,
         "StatusCallbackEvents[]": "terminal",
     }
