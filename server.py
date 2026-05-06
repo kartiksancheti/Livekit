@@ -89,18 +89,18 @@ async def _initiate_exotel_call(
 
     status_cb = cfg("EXOTEL_STATUS_CALLBACK")
     payload = {
-        "From":        clean,
-        "CallerId":    caller_id,
-        "AppId":       app_id,
-        "CustomField": custom_field,
-        "StatusCallbackEvents[0]": "terminal",
-        "Url": f"https://my.exotel.com/{sid}/exoml/start_voice/{app_id}",
+        "From":     clean,
+        "CallerId": caller_id,
+        "Url":      f"https://my.exotel.com/{sid}/exoml/start_voice/{app_id}",
     }
     if status_cb:
-        payload["StatusCallback"] = status_cb
+        payload["StatusCallback"]        = status_cb
+        payload["StatusCallbackEvents[0]"] = "terminal"
+    if custom_field:
+        payload["CustomField"] = custom_field
 
     url = f"https://api.exotel.com/v1/Accounts/{sid}/Calls/connect"
-    print(f"DEBUG EXOTEL PAYLOAD: From={payload['From']} CallerId={payload['CallerId']} AppId={payload['AppId']}", flush=True)
+    print(f"DEBUG EXOTEL PAYLOAD: From={clean} CallerId={caller_id} AppId={app_id} Url={payload['Url']}", flush=True)
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
