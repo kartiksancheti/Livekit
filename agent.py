@@ -625,9 +625,6 @@ class ExotelCallHandler:
                         await self._log(
                             f"Stream started: sid={self.stream_sid} call={self.call_sid} phone={self.phone_number}"
                         )
-                        # Send silence immediately to keep Exotel connection alive
-                        # while Gemini is generating the first response
-                        asyncio.create_task(self._send_keepalive_silence())
 
                     elif event == "media":
                         track = data["media"].get("track", "inbound")
