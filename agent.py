@@ -562,7 +562,10 @@ class ExotelCallHandler:
                         s = data.get("start", {})
                         self.stream_sid = s.get("streamSid") or s.get("stream_sid")
                         self.call_sid   = s.get("callSid") or s.get("call_sid")
-                        params = s.get("customParameters", {})
+                        media_format = s.get("media_format", {})
+                        print(f"DEBUG: media_format={media_format}", flush=True)
+                        print(f"DEBUG: full start payload={json.dumps(s)[:300]}", flush=True)
+                        params = s.get("customParameters", {}) or s.get("custom_parameters", {})
                         if not self.phone_number:
                             self.phone_number = params.get("phone_number") or params.get("phone")
                         if not self.lead_name:
