@@ -230,22 +230,20 @@ class ExotelCallHandler:
 
     # ── Audio codec helpers ───────────────────────────────────────────────────
 
-    def _to_gemini(self, b64_mulaw: str) -> bytes:
-        """mulaw-8kHz base64 → PCM-16bit-16kHz bytes for Gemini input."""
-        raw    = base64.b64decode(b64_mulaw)
-        pcm_8k = audioop.ulaw2lin(raw, 2)
-        pcm_16k, self._in_state = audioop.ratecv(
-            pcm_8k, 2, 1, EXOTEL_RATE, GEMINI_IN_RATE, self._in_state
-        )
-        return pcm_16k
+    def _to_gemini(self, b64_payload: str) -> bytes:
+    """raw PCM 8kHz base64 → PCM-16bit-16kHz bytes for Gemini input."""
+    pcm_8k = base64.b64decode(b64_payload)   # already raw PCM, no mulaw decode
+    pcm_16k, self._in_state = audioop.ratecv(
+        pcm_8k, 2, 1, EXOTEL_RATE, GEMINI_IN_RATE, self._in_state
+    )
+    return pcm_16k
 
     def _to_exotel(self, pcm_bytes: bytes) -> str:
-        """PCM-16bit-24kHz bytes from Gemini → mulaw-8kHz base64 for Exotel."""
-        pcm_8k, self._out_state = audioop.ratecv(
-            pcm_bytes, 2, 1, GEMINI_OUT_RATE, EXOTEL_RATE, self._out_state
-        )
-        mulaw = audioop.lin2ulaw(pcm_8k, 2)
-        return base64.b64encode(mulaw).decode()
+    """PCM-16bit-24kHz from Gemini → raw PCM 8kHz base64 for Exotel."""
+    pcm_8k, self._out_state = audioop.ratecv(
+        pcm_bytes, 2, 1, GEMINI_OUT_RATE, EXOTEL_RATE, self._out_state
+    )
+    return base64.b64encode(pcm_8k).decode()  # raw PCM, no mulaw encoding
 
     async def _send_media(self, pcm_bytes: bytes) -> None:
         """Encode Gemini audio and push to Exotel WebSocket."""
