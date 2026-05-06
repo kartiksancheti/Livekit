@@ -461,15 +461,27 @@ class ExotelCallHandler:
     async def _recv_gemini(self, session) -> None:
         """Read Gemini Live responses: forward audio to Exotel, execute tool calls."""
         from google.genai import types
+        print("DEBUG: _recv_gemini started", flush=True)
+        response_count = 0
         try:
             async for response in session.receive():
                 if self._closed:
                     break
 
+                response_count += 1
+                if response_count <= 5:
+                    print(f"DEBUG: gemini response #{response_count} type={type(response).__name__}", flush=True)
+                    print(f"DEBUG: response attrs={[a for a in dir(response) if not a.startswith('_')]}", flush=True)
+
                 # ── Audio output ──────────────────────────────────────────────
                 audio: Optional[bytes] = None
+
+                # Check direct data attribute
                 if getattr(response, "data", None):
                     audio = response.data
+                    print(f"DEBUG: audio from response.data len={len(audio)}", flush=True)
+
+                # Check server_content path
                 elif (
                     getattr(response, "server_content", None)
                     and getattr(response.server_content, "model_turn", None)
@@ -477,9 +489,12 @@ class ExotelCallHandler:
                     for part in response.server_content.model_turn.parts or []:
                         if getattr(getattr(part, "inline_data", None), "data", None):
                             audio = part.inline_data.data
+                            print(f"DEBUG: audio from inline_data len={len(audio)}", flush=True)
                             break
                 if audio:
                     await self._send_media(audio)
+                elif response_count <= 5:
+                    print(f"DEBUG: no audio in this response", flush=True)
 
                 # ── Tool calls ────────────────────────────────────────────────
                 if getattr(response, "tool_call", None):
@@ -497,7 +512,10 @@ class ExotelCallHandler:
                         )
 
         except Exception as exc:
+            print(f"DEBUG: _recv_gemini error: {type(exc).__name__}: {exc}", flush=True)
             await self._log(f"Gemini receive error: {exc}", str(exc), "error")
+      
+        print(f"DEBUG: _recv_gemini ended after {response_count} responses", flush=True)
 
     # ── Exotel receive loop (drains buffer queue then reads live) ─────────────
 
